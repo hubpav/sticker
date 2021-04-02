@@ -41,13 +41,16 @@ data = {
 
 # Synchronization objects
 lock = threading.RLock()
-send = threading.Event()
+sem = threading.Semaphore(0)
+stop = threading.Event()
+
 
 # Send worker function
 def send_worker(device, interval, endpoint):
     while True:
-        if send.wait(interval):
-            send.clear()
+        sem.acquire(blocking=True, timeout=interval)
+        if stop.is_set():
+            return
         with lock:
             payload = {
                 'device': device,
@@ -62,8 +65,12 @@ def send_worker(device, interval, endpoint):
         if endpoint is not None:
             try:
                 requests.post(endpoint, json=payload)
-            except:
+            except requests.RequestException:
                 print(HTML('<orangered>HTTP request failed</orangered>'))
+
+
+worker = None
+
 
 # Application entrypoint
 @click.command()
@@ -73,9 +80,11 @@ def send_worker(device, interval, endpoint):
 @click.option('-s', '--script', type=click.Path(exists=True), help='Path to automation script (shell is not provided).')
 def main(device, interval, endpoint, script):
 
+    global worker
+
     # Start send worker
-    t = threading.Thread(target=send_worker, args=(device, interval, endpoint), daemon=True)
-    t.start()
+    worker = threading.Thread(target=send_worker, args=(device, interval, endpoint), daemon=True)
+    worker.start()
 
     cd = CommandDispatcher()
 
@@ -111,7 +120,7 @@ def main(device, interval, endpoint, script):
                 if not cd.dispatch(cmd):
                     print(HTML('<orangered>Invalid command</orangered>'))
                     sys.exit(1)
-        sys.exit(0)
+        do_exit()
 
     # Pass list of all commands to completer
     completer = WordCompleter(cd.get_prefixes())
@@ -122,9 +131,9 @@ def main(device, interval, endpoint, script):
     # Process prompt commands in loop
     while True:
         cmd = session.prompt(HTML('<steelblue><b>sticker> </b></steelblue>'),
-            completer=completer,
-            complete_while_typing=True,
-            auto_suggest=AutoSuggestFromHistory())
+                             completer=completer,
+                             complete_while_typing=True,
+                             auto_suggest=AutoSuggestFromHistory())
 
         # Strip whitespace
         cmd = cmd.strip()
@@ -137,49 +146,63 @@ def main(device, interval, endpoint, script):
         if not cd.dispatch(cmd):
             print(HTML('<orangered>Invalid command</orangered>'))
 
+
 def do_exit():
+    stop.set()
+    sem.release()
+    worker.join()
     sys.exit(0)
 
+
 def do_send():
-    send.set()
+    sem.release()
+
 
 def do_delay(value):
     time.sleep(value)
 
+
 def trigger_device_boot():
     with lock:
         data['event']['device_boot'] = 1
-        send.set()
+        sem.release()
+
 
 def trigger_manipulation():
     with lock:
         data['event']['manipulation'] += 1
         if data['event']['manipulation'] > 65535:
             data['event']['manipulation'] = 0
-        send.set()
+        sem.release()
+
 
 def trigger_pir_motion():
     with lock:
         data['event']['pir_motion'] += 1
         if data['event']['pir_motion'] > 65535:
             data['event']['pir_motion'] = 0
-        send.set()
+        sem.release()
+
 
 def set_batt_voltage(value):
     with lock:
         data['state']['batt_voltage'] = value
 
+
 def set_humidity(value):
     with lock:
         data['state']['humidity'] = value
+
 
 def set_illuminance(value):
     with lock:
         data['state']['illuminance'] = value
 
+
 def set_orientation(value):
     with lock:
         data['state']['orientation'] = value
+
 
 def set_reed_switch_1(value):
     with lock:
@@ -188,13 +211,14 @@ def set_reed_switch_1(value):
             if data['event']['reed_switch_1']['activation'] > 65535:
                 data['event']['reed_switch_1']['activation'] = 0
             data['state']['reed_switch_1'] = 1
-            send.set()
+            sem.release()
         elif data['state']['reed_switch_1'] == 1 and value == 0:
             data['event']['reed_switch_1']['deactivation'] += 1
             if data['event']['reed_switch_1']['deactivation'] > 65535:
                 data['event']['reed_switch_1']['deactivation'] = 0
             data['state']['reed_switch_1'] = 0
-            send.set()
+            sem.release()
+
 
 def set_reed_switch_2(value):
     with lock:
@@ -203,17 +227,19 @@ def set_reed_switch_2(value):
             if data['event']['reed_switch_2']['activation'] > 65535:
                 data['event']['reed_switch_2']['activation'] = 0
             data['state']['reed_switch_2'] = 1
-            send.set()
+            sem.release()
         elif data['state']['reed_switch_2'] == 1 and value == 0:
             data['event']['reed_switch_2']['deactivation'] += 1
             if data['event']['reed_switch_2']['deactivation'] > 65535:
                 data['event']['reed_switch_2']['deactivation'] = 0
             data['state']['reed_switch_2'] = 0
-            send.set()
+            sem.release()
+
 
 def set_temperature(value):
     with lock:
         data['state']['temperature'] = value
+
 
 class IntParser:
 
@@ -233,6 +259,7 @@ class IntParser:
             if value > self._max:
                 return None
         return value
+
 
 class FloatParser:
 
@@ -255,6 +282,7 @@ class FloatParser:
             if value > self._max:
                 return None
         return value
+
 
 class CommandDispatcher:
 
@@ -289,6 +317,7 @@ class CommandDispatcher:
                         cmd['handler']()
                 return True
         return False
+
 
 if __name__ == '__main__':
     try:
