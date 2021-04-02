@@ -60,7 +60,7 @@ def send_worker(device, interval, endpoint):
         output = json.dumps(payload, indent=2)
         with open('sticker_reports', 'a') as writer:
             dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            template = '\n{} ===============================\n\n{}\n'
+            template = '\n=================== {} ===================\n\n{}\n'
             writer.write(template.format(dt, output))
         if endpoint is not None:
             try:
@@ -116,9 +116,7 @@ def main(device, interval, endpoint, script):
                 if len(cmd) == 0:
                     continue
                 if not cd.dispatch(cmd):
-                    print(HTML('<orangered>Invalid command (line {})</orangered>'.format(line)))
-                if not cd.dispatch(cmd):
-                    print(HTML('<orangered>Invalid command</orangered>'))
+                    print(HTML('<orangered>Invalid command (line {})</orangered>'.format(line + 1)))
                     sys.exit(1)
         do_exit()
 
@@ -313,6 +311,8 @@ class CommandDispatcher:
                         cmd['handler'](value)
                     return True
                 else:
+                    if len(input) != len(cmd['prefix']):
+                        return False
                     if cmd['handler'] is not None:
                         cmd['handler']()
                 return True
