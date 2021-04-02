@@ -40,7 +40,7 @@ This repository contains Python application for STICKER device simulation by HAR
 6. Install the required packages:
 
    ```
-   python3 -m pip -r requirements.txt
+   python3 -m pip install -r requirements.txt
    ```
 
 
